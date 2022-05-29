@@ -28,6 +28,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from tqdm import tqdm
 from typing import NamedTuple, Optional, Union
+import wandb
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -365,6 +366,13 @@ last_upsamp_step = args.init_iters
 if args.enable_random:
     warn("Randomness is enabled for training (normal for LLFF & scenes with background)")
 
+name = args.train_dir.split("/")[-1]
+wandb.init(project="plenoxels", entity="photos2reality", name=name)
+wandb.config.name = name
+wandb.config.update(args)
+
+
+
 epoch_id = -1
 while True:
     dset.shuffle_rays()
@@ -393,6 +401,8 @@ while True:
             #  img_save_interval = 1
 
             n_images_gen = 0
+
+            wandb_images = []
             for i, img_id in tqdm(enumerate(img_ids), total=len(img_ids)):
                 c2w = dset_test.c2w[img_id].to(device=device)
                 cam = svox2.Camera(c2w,
@@ -411,6 +421,8 @@ while True:
                     img_pred.clamp_max_(1.0)
                     summary_writer.add_image(f'test/image_{img_id:04d}',
                             img_pred, global_step=gstep_id_base, dataformats='HWC')
+                    print(f'IMAGE_SHAPE: {img_pred.shape}')
+                    wandb_images.append(wandb.Image(img_pred.detach().numpy(), caption=f'test/image_{img_id:04d}'))
                     if args.log_mse_image:
                         mse_img = all_mses / all_mses.max()
                         summary_writer.add_image(f'test/mse_map_{img_id:04d}',
@@ -433,6 +445,10 @@ while True:
                     assert False
                 stats_test['mse'] += mse_num
                 stats_test['psnr'] += psnr
+
+                wandb.log({"test/images": wandb_images}, step=gstep_id_base)
+                
+
                 n_images_gen += 1
 
             if grid.basis_type == svox2.BASIS_TYPE_3D_TEXTURE or \
@@ -464,7 +480,9 @@ while True:
             for stat_name in stats_test:
                 summary_writer.add_scalar('test/' + stat_name,
                         stats_test[stat_name], global_step=gstep_id_base)
+                wandb.log({'test/' + stat_name: stats_test[stat_name]}, step=gstep_id_base)
             summary_writer.add_scalar('epoch_id', float(epoch_id), global_step=gstep_id_base)
+            wandb.log({'epoch_id': float(epoch_id)}, step=gstep_id_base)
             print('eval stats:', stats_test)
     if epoch_id % max(factor, args.eval_every) == 0: #and (epoch_id > 0 or not args.tune_mode):
         # NOTE: we do an eval sanity check, if not in tune_mode
@@ -517,6 +535,7 @@ while True:
                 for stat_name in stats:
                     stat_val = stats[stat_name] / args.print_every
                     summary_writer.add_scalar(stat_name, stat_val, global_step=gstep_id)
+                    wandb.log({stat_name: stat_val}, step=gstep_id)
                     stats[stat_name] = 0.0
                 #  if args.lambda_tv > 0.0:
                 #      with torch.no_grad():
@@ -529,12 +548,17 @@ while True:
                 #  with torch.no_grad():
                 #      tv_basis = grid.tv_basis() #  summary_writer.add_scalar("loss_tv_basis", tv_basis, global_step=gstep_id)
                 summary_writer.add_scalar("lr_sh", lr_sh, global_step=gstep_id)
+                wandb.log({'lr_sh': lr_sh}, step=gstep_id)
                 summary_writer.add_scalar("lr_sigma", lr_sigma, global_step=gstep_id)
+                wandb.log({'lr_sigma': lr_sigma}, step=gstep_id)
                 if grid.basis_type == svox2.BASIS_TYPE_3D_TEXTURE:
                     summary_writer.add_scalar("lr_basis", lr_basis, global_step=gstep_id)
+                    wandb.log({'lr_basis': lr_basis}, step=gstep_id)
                 if grid.use_background:
                     summary_writer.add_scalar("lr_sigma_bg", lr_sigma_bg, global_step=gstep_id)
+                    wandb.log({'lr_sigma_bg': lr_sigma_bg}, step=gstep_id)
                     summary_writer.add_scalar("lr_color_bg", lr_color_bg, global_step=gstep_id)
+                    wandb.log({'lr_color_bg': lr_color_bg}, step=gstep_id)
 
                 if args.weight_decay_sh < 1.0:
                     grid.sh_data.data *= args.weight_decay_sigma
