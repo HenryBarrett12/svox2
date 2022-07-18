@@ -421,7 +421,7 @@ while True:
                     img_pred.clamp_max_(1.0)
                     summary_writer.add_image(f'test/image_{img_id:04d}',
                             img_pred, global_step=gstep_id_base, dataformats='HWC')
-                    print(f'IMAGE_SHAPE: {img_pred.shape}')
+                    
                     wandb_images.append(wandb.Image(img_pred.detach().numpy(), caption=f'test/image_{img_id:04d}'))
                     if args.log_mse_image:
                         mse_img = all_mses / all_mses.max()
@@ -636,6 +636,9 @@ while True:
             factor, args.save_every) == 0 and not args.tune_mode:
         print('Saving', ckpt_path)
         grid.save(ckpt_path)
+        artifact = wandb.Artifact('model', type='model')
+        artifact.add_file(ckpt_path)
+        wandb.log_artifact(artifact)
 
     if (gstep_id_base - last_upsamp_step) >= args.upsamp_every:
         last_upsamp_step = gstep_id_base
